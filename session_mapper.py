@@ -125,6 +125,27 @@ def get_opencode_sessions():
 
     return results
 
+import math
+import subprocess
+
+def resume_session(session):
+    agent = session["Agent"]
+    proj_dir = session["Project Directory"]
+    
+    print(f"\n🚀 Resuming {agent} session in: {proj_dir}\n")
+    
+    try:
+        if agent == "Gemini":
+            # Resume Gemini in the project directory
+            subprocess.run(["gemini", "--resume", "latest"], cwd=proj_dir)
+        elif agent == "Opencode":
+            # Resume Opencode with project directory
+            subprocess.run(["opencode", proj_dir])
+    except FileNotFoundError:
+        print(f"[!] '{agent.lower()}' executable not found in PATH. Make sure it is installed.")
+    except Exception as e:
+        print(f"[!] Error resuming session: {e}")
+
 def main():
     print("[i] Scanning for AI Agent Logging Sessions (Gemini & Opencode)...")
     gemini_data = get_gemini_sessions()
@@ -136,34 +157,78 @@ def main():
         print("[!] No sessions found on this machine.")
         return
         
-    col_widths = {
-        "Agent": 10,
-        "Session Name": 18,
-        "Project Directory": 20,
-        "Last Active": 12
-    }
+    page_size = 10
+    total_pages = math.ceil(len(all_sessions) / page_size)
+    page = 0
     
-    for row in all_sessions:
-        col_widths["Agent"] = max(col_widths["Agent"], len(str(row["Agent"])))
-        col_widths["Session Name"] = max(col_widths["Session Name"], len(str(row["Session Name"])))
-        col_widths["Project Directory"] = max(col_widths["Project Directory"], len(str(row["Project Directory"])))
-        col_widths["Last Active"] = max(col_widths["Last Active"], len(str(row["Last Active"])))
+    while True:
+        # Clear screen for better interactive experience (optional, but keep simple for now)
+        print("\n" + "="*80)
+        print(f"📄 Page {page + 1} of {total_pages}")
+        print("="*80)
         
-    def print_row(agent, sname, proj, active, sep=" | "):
-        print(f"| {agent.ljust(col_widths['Agent'])}{sep}"
-              f"{sname.ljust(col_widths['Session Name'])}{sep}"
-              f"{proj.ljust(col_widths['Project Directory'])}{sep}"
-              f"{active.ljust(col_widths['Last Active'])} |")
-              
-    separator_len = sum(col_widths.values()) + 13
-    print("-" * separator_len)
-    print_row("Agent", "Session Name", "Project Directory", "Last Active")
-    print("-" * separator_len)
+        start_idx = page * page_size
+        end_idx = start_idx + page_size
+        current_sessions = all_sessions[start_idx:end_idx]
+        
+        col_widths = {
+            "Idx": 4,
+            "Agent": 10,
+            "Session Name": 18,
+            "Project Directory": 20,
+            "Last Active": 12
+        }
+        
+        # Calculate dynamic widths based on CURRENT page
+        for i, row in enumerate(current_sessions):
+            col_widths["Agent"] = max(col_widths["Agent"], len(str(row["Agent"])))
+            col_widths["Session Name"] = max(col_widths["Session Name"], len(str(row["Session Name"])))
+            col_widths["Project Directory"] = max(col_widths["Project Directory"], len(str(row["Project Directory"])))
+            col_widths["Last Active"] = max(col_widths["Last Active"], len(str(row["Last Active"])))
+            
+        def print_row(idx, agent, sname, proj, active):
+            print(f"| {idx.ljust(col_widths['Idx'])} | "
+                  f"{agent.ljust(col_widths['Agent'])} | "
+                  f"{sname.ljust(col_widths['Session Name'])} | "
+                  f"{proj.ljust(col_widths['Project Directory'])} | "
+                  f"{active.ljust(col_widths['Last Active'])} |")
+                  
+        separator_len = sum(col_widths.values()) + 16
+        print("-" * separator_len)
+        print_row("Idx", "Agent", "Session Name", "Project Directory", "Last Active")
+        print("-" * separator_len)
+        
+        for i, row in enumerate(current_sessions):
+            print_row(str(i), str(row["Agent"]), str(row["Session Name"]), str(row["Project Directory"]), str(row["Last Active"]))
     
-    for row in all_sessions:
-        print_row(str(row["Agent"]), str(row["Session Name"]), str(row["Project Directory"]), str(row["Last Active"]))
-
-    print("-" * separator_len)
+        print("-" * separator_len)
+        
+        print("\nCommands:")
+        print("  [0-9] Resume the session by index from the table above")
+        if page < total_pages - 1:
+            print("  [n]   Next page")
+        if page > 0:
+            print("  [p]   Previous page")
+        print("  [q]   Quit")
+        
+        choice = input("\nSelect an option: ").strip().lower()
+        if choice == 'q':
+            print("Goodbye!")
+            break
+        elif choice == 'n' and page < total_pages - 1:
+            page += 1
+        elif choice == 'p' and page > 0:
+            page -= 1
+        elif choice.isdigit():
+            idx = int(choice)
+            if 0 <= idx < len(current_sessions):
+                session = current_sessions[idx]
+                resume_session(session)
+                break
+            else:
+                print(f"[!] Invalid index. Please select a number between 0 and {len(current_sessions)-1}.")
+        else:
+            print("[!] Invalid command.")
 
 if __name__ == "__main__":
     main()
