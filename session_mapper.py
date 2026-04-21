@@ -22,10 +22,8 @@ def get_gemini_sessions():
     results = []
     gemini_dir = Path.home() / ".gemini"
     projects_file = gemini_dir / "projects.json"
-    history_dir = gemini_dir / "history"
-    sessions_dir = gemini_dir / "sessions"
-    tmp_dir = gemini_dir / "tmp"
 
+    dir_map = {}
     if projects_file.exists():
         try:
             with open(projects_file, 'r', encoding='utf-8') as f:
@@ -38,66 +36,78 @@ def get_gemini_sessions():
                 
                 if isinstance(projects_dict, dict):
                     for k, v in projects_dict.items():
-                        session_id = k
-                        proj_path = v
                         if os.path.isabs(k) and not os.path.isabs(str(v)):
-                            session_id = v
-                            proj_path = k
-                        
-                        last_active = "Unknown"
-                        timestamp = 0
-                        real_session_id = session_id
-                        
-                        # Search in history, sessions, or tmp
-                        for sd in [history_dir, sessions_dir, tmp_dir]:
-                            if not sd.exists(): continue
-                            
-                            folder = sd / session_id
-                            json_file = sd / f"{session_id}.json"
-                            
-                            if folder.exists() and folder.is_dir():
-                                mtime = os.path.getmtime(folder)
-                                timestamp = mtime
-                                last_active = get_time_ago(datetime.datetime.fromtimestamp(mtime))
-                                
-                                # Try to find real UUID in logs.json
-                                logs_file = folder / "logs.json"
-                                if logs_file.exists():
-                                    try:
-                                        with open(logs_file, 'r', encoding='utf-8') as lf:
-                                            logs = json.load(lf)
-                                            if logs and isinstance(logs, list):
-                                                real_session_id = logs[-1].get("sessionId", session_id)
-                                    except:
-                                        pass
-                                break
-                            elif json_file.exists():
-                                mtime = os.path.getmtime(json_file)
-                                timestamp = mtime
-                                last_active = get_time_ago(datetime.datetime.fromtimestamp(mtime))
-                                break
-                                
-                        session_name = os.path.basename(proj_path)
-                        if not session_name:
-                            session_name = session_id
-                            
-                        results.append({
-                            "Agent": "Gemini",
-                            "Session Name": session_name,
-                            "Project Directory": proj_path,
-                            "Last Active": last_active,
-                            "timestamp": timestamp,
-                            "session_id": real_session_id
-                        })
+                            dir_map[v] = k
+                        else:
+                            dir_map[k] = v
         except Exception as e:
-            results.append({
-                "Agent": "Gemini",
-                "Session Name": "Error",
-                "Project Directory": f"Could not parse projects.json: {e}",
-                "Last Active": "-",
-                "timestamp": 0,
-                "session_id": None
-            })
+            pass
+
+    # Now search for actual sessions inside tmp/{project_id}/chats/session-*.json
+    tmp_dir = gemini_dir / "tmp"
+    if tmp_dir.exists():
+        for proj_folder in tmp_dir.iterdir():
+            if not proj_folder.is_dir(): continue
+            chats_dir = proj_folder / "chats"
+            if not chats_dir.exists(): continue
+            
+            project_id = proj_folder.name
+            proj_path = dir_map.get(project_id, f"Unknown ({project_id})")
+            
+            for json_file in chats_dir.glob("session-*.json"):
+                try:
+                    with open(json_file, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        
+                    sid = data.get("sessionId", "")
+                    if not sid:
+                        continue
+                        
+                    # Get title from summary or first message
+                    session_name = data.get("summary")
+                    if not session_name:
+                        messages = data.get("messages", [])
+                        if messages:
+                            content = messages[0].get("content", [])
+                            if isinstance(content, list) and len(content) > 0:
+                                text = str(content[0].get("text", ""))
+                                session_name = text[:40] + ("..." if len(text) > 40 else "")
+                        
+                    if not session_name:
+                        session_name = "Untitled Session"
+                        
+                    # Time
+                    last_active = "Unknown"
+                    timestamp = 0
+                    last_updated_str = data.get("lastUpdated")
+                    if last_updated_str:
+                        try:
+                            last_updated_str = last_updated_str.replace("Z", "+00:00")
+                            dt = datetime.datetime.fromisoformat(last_updated_str)
+                            # Convert to naive local time for get_time_ago
+                            dt_local = dt.astimezone()
+                            dt_naive = dt_local.replace(tzinfo=None)
+                            timestamp = dt_local.timestamp()
+                            last_active = get_time_ago(dt_naive)
+                        except Exception:
+                            pass
+                            
+                    if timestamp == 0:
+                        mtime = os.path.getmtime(json_file)
+                        timestamp = mtime
+                        last_active = get_time_ago(datetime.datetime.fromtimestamp(mtime))
+                        
+                    results.append({
+                        "Agent": "Gemini",
+                        "Session Name": session_name,
+                        "Project Directory": proj_path,
+                        "Last Active": last_active,
+                        "timestamp": timestamp,
+                        "session_id": sid
+                    })
+                except Exception:
+                    pass
+
     return results
 
 def get_opencode_sessions():
@@ -116,13 +126,13 @@ def get_opencode_sessions():
                 import sqlite3
                 conn = sqlite3.connect(db_path)
                 cursor = conn.cursor()
-                cursor.execute("SELECT id, name, worktree, time_updated FROM project")
+                cursor.execute("SELECT id, title, directory, time_updated FROM session")
                 rows = cursor.fetchall()
                 conn.close()
                 
-                for sid, name, worktree, updated_ms in rows:
-                    if not worktree or worktree == "/":
-                        continue
+                for sid, title, directory, updated_ms in rows:
+                    if not directory or directory == "/":
+                        directory = "Unknown"
                     
                     last_active = "Unknown"
                     timestamp = 0
@@ -131,14 +141,14 @@ def get_opencode_sessions():
                         dt = datetime.datetime.fromtimestamp(timestamp)
                         last_active = get_time_ago(dt)
                     
-                    session_name = name if name else os.path.basename(worktree)
+                    session_name = title if title else sid
                     if not session_name:
-                        session_name = worktree
+                        session_name = directory
                         
                     results.append({
                         "Agent": "Opencode",
                         "Session Name": session_name,
-                        "Project Directory": worktree,
+                        "Project Directory": directory,
                         "Last Active": last_active,
                         "timestamp": timestamp,
                         "session_id": sid
@@ -205,104 +215,7 @@ def get_opencode_sessions():
     
     return results
 
-def get_opencode_sessions():
-    results = []
-    
-    # 1. Try SQLite Database (Linux/macOS/Windows)
-    db_candidates = [
-        Path.home() / ".local" / "share" / "opencode" / "opencode.db",
-        Path.home() / ".config" / "opencode" / "opencode.db",
-        Path(os.environ.get('APPDATA', '')) / "ai.opencode.desktop" / "opencode.db" if os.environ.get('APPDATA') else None,
-    ]
-    
-    for db_path in filter(None, db_candidates):
-        if db_path.exists():
-            try:
-                import sqlite3
-                conn = sqlite3.connect(db_path)
-                cursor = conn.cursor()
-                cursor.execute("SELECT name, worktree, time_updated FROM project")
-                rows = cursor.fetchall()
-                conn.close()
-                
-                for name, worktree, updated_ms in rows:
-                    if not worktree or worktree == "/":
-                        continue
-                    
-                    last_active = "Unknown"
-                    if updated_ms:
-                        # Assume ms
-                        dt = datetime.datetime.fromtimestamp(updated_ms / 1000.0)
-                        last_active = get_time_ago(dt)
-                    
-                    session_name = name if name else os.path.basename(worktree)
-                    if not session_name:
-                        session_name = worktree
-                        
-                    results.append({
-                        "Agent": "Opencode",
-                        "Session Name": session_name,
-                        "Project Directory": worktree,
-                        "Last Active": last_active
-                    })
-                # If we found sessions in DB, we can return them
-                if results:
-                    return results
-            except Exception as e:
-                pass
 
-    # 2. Fallback to opencode.global.dat (Legacy/Windows)
-    candidates = []
-    appdata = os.environ.get('APPDATA')
-    if appdata:
-        candidates.append(Path(appdata) / "ai.opencode.desktop")
-    candidates.append(Path.home() / "AppData" / "Roaming" / "ai.opencode.desktop")
-    candidates.append(Path.home() / ".config" / "ai.opencode.desktop")
-    candidates.append(Path.home() / ".local" / "share" / "ai.opencode.desktop")
-    candidates.append(Path.home() / "Library" / "Application Support" / "ai.opencode.desktop")
-    
-    opencode_dir = None
-    for cand in candidates:
-        if cand.exists() and cand.is_dir():
-            opencode_dir = cand
-            break
-            
-    if opencode_dir:
-        global_dat = opencode_dir / "opencode.global.dat"
-        if global_dat.exists():
-            try:
-                with open(global_dat, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    
-                projects_str = data.get("globalSync.project")
-                if projects_str:
-                    projects = json.loads(projects_str)
-                    if isinstance(projects, dict) and "value" in projects:
-                        for p in projects["value"]:
-                            worktree = p.get("worktree", "")
-                            if not worktree or worktree == "/":
-                                continue
-                            
-                            updated_ms = p.get("time", {}).get("updated", 0)
-                            last_active = "Unknown"
-                            if updated_ms:
-                                dt = datetime.datetime.fromtimestamp(updated_ms / 1000.0)
-                                last_active = get_time_ago(dt)
-                                
-                            session_name = os.path.basename(worktree)
-                            if not session_name:
-                                session_name = worktree
-                                
-                            results.append({
-                                "Agent": "Opencode",
-                                "Session Name": session_name,
-                                "Project Directory": worktree,
-                                "Last Active": last_active
-                            })
-            except Exception as e:
-                pass
-    
-    return results
 
 import math
 import subprocess
