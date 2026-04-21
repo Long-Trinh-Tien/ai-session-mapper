@@ -317,17 +317,19 @@ def resume_session(session):
         if agent == "Gemini":
             # Resume Gemini with session ID if available, otherwise fallback to latest
             sid = session.get("session_id")
+            cmd = "gemini.cmd" if os.name == 'nt' else "gemini"
             if sid:
-                subprocess.run(["gemini", "--resume", sid], cwd=proj_dir)
+                subprocess.run([cmd, "--resume", sid], cwd=proj_dir)
             else:
-                subprocess.run(["gemini", "--resume", "latest"], cwd=proj_dir)
+                subprocess.run([cmd, "--resume", "latest"], cwd=proj_dir)
         elif agent == "Opencode":
             # Resume Opencode with session ID
             sid = session.get("session_id")
+            cmd = "opencode-cli.exe" if os.name == 'nt' else "opencode"
             if sid:
-                subprocess.run(["opencode", "-s", sid])
+                subprocess.run([cmd, "-s", sid])
             else:
-                subprocess.run(["opencode", proj_dir])
+                subprocess.run([cmd, proj_dir])
     except FileNotFoundError:
         print(f"[!] '{agent.lower()}' executable not found in PATH. Make sure it is installed.")
     except Exception as e:
@@ -386,6 +388,7 @@ def main():
         col_widths = {
             "Idx": 4,
             "Agent": 10,
+            "Session ID": 12,
             "Session Name": 18,
             "Project Directory": 20,
             "Last Active": 12
@@ -393,26 +396,30 @@ def main():
         
         for row in current_page_sessions:
             col_widths["Agent"] = max(col_widths["Agent"], len(str(row["Agent"])))
+            sid_str = str(row.get("session_id", ""))[:12] if row.get("session_id") else ""
+            col_widths["Session ID"] = max(col_widths["Session ID"], len(sid_str))
             col_widths["Session Name"] = max(col_widths["Session Name"], len(str(row["Session Name"])))
             col_widths["Project Directory"] = max(col_widths["Project Directory"], len(str(row["Project Directory"])))
             col_widths["Last Active"] = max(col_widths["Last Active"], len(str(row["Last Active"])))
             
-        def print_row(idx, agent, sname, proj, active):
+        def print_row(idx, agent, sid, sname, proj, active):
             print(f"| {idx.ljust(col_widths['Idx'])} | "
                   f"{agent.ljust(col_widths['Agent'])} | "
+                  f"{sid.ljust(col_widths['Session ID'])} | "
                   f"{sname.ljust(col_widths['Session Name'])} | "
                   f"{proj.ljust(col_widths['Project Directory'])} | "
                   f"{active.ljust(col_widths['Last Active'])} |")
                    
-        separator_len = sum(col_widths.values()) + 16
+        separator_len = sum(col_widths.values()) + 19
         print("-" * separator_len)
-        print_row("Idx", "Agent", "Session Name", "Project Directory", "Last Active")
+        print_row("Idx", "Agent", "Session ID", "Session Name", "Project Directory", "Last Active")
         print("-" * separator_len)
         
         for i, row in enumerate(current_page_sessions):
             # Use global index relative to filtered list for resuming
             global_idx = start_idx + i
-            print_row(str(global_idx), str(row["Agent"]), str(row["Session Name"]), str(row["Project Directory"]), str(row["Last Active"]))
+            sid_str = str(row.get("session_id", ""))[:12] if row.get("session_id") else "None"
+            print_row(str(global_idx), str(row["Agent"]), sid_str, str(row["Session Name"]), str(row["Project Directory"]), str(row["Last Active"]))
         
         print("-" * separator_len)
         
