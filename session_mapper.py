@@ -266,6 +266,18 @@ def main():
     page = 0
     page_size = 10
     
+    # Enable ANSI escape sequences on Windows
+    if os.name == 'nt':
+        os.system('')
+        
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+    CYAN = "\033[36m"
+    MAGENTA = "\033[35m"
+    YELLOW = "\033[33m"
+    GREEN = "\033[32m"
+    DIM = "\033[2m"
+    
     while True:
         # Apply filter
         if current_filter == "gemini":
@@ -299,42 +311,58 @@ def main():
         current_page_sessions = filtered_sessions[start_idx:end_idx]
         
         col_widths = {
-            "Idx": 4,
-            "Agent": 10,
+            "Idx": 3,
+            "Agent": 8,
             "Session ID": 12,
-            "Session Name": 18,
-            "Project Directory": 20,
-            "Last Active": 12
+            "Session Name": 12,
+            "Project Directory": 17,
+            "Last Active": 11
         }
         
+        max_sname_len = 50
+        max_proj_len = 45
+        
+        def truncate(text, max_len):
+            return text[:max_len-3] + "..." if len(text) > max_len else text
+        
         for row in current_page_sessions:
+            sname_trunc = truncate(str(row["Session Name"]), max_sname_len)
+            proj_trunc = truncate(str(row["Project Directory"]), max_proj_len)
+            row["_sname_trunc"] = sname_trunc
+            row["_proj_trunc"] = proj_trunc
+            
             col_widths["Agent"] = max(col_widths["Agent"], len(str(row["Agent"])))
             sid_str = str(row.get("session_id", ""))[:12] if row.get("session_id") else ""
             col_widths["Session ID"] = max(col_widths["Session ID"], len(sid_str))
-            col_widths["Session Name"] = max(col_widths["Session Name"], len(str(row["Session Name"])))
-            col_widths["Project Directory"] = max(col_widths["Project Directory"], len(str(row["Project Directory"])))
+            col_widths["Session Name"] = max(col_widths["Session Name"], len(sname_trunc))
+            col_widths["Project Directory"] = max(col_widths["Project Directory"], len(proj_trunc))
             col_widths["Last Active"] = max(col_widths["Last Active"], len(str(row["Last Active"])))
             
-        def print_row(idx, agent, sid, sname, proj, active):
-            print(f"| {idx.ljust(col_widths['Idx'])} | "
-                  f"{agent.ljust(col_widths['Agent'])} | "
-                  f"{sid.ljust(col_widths['Session ID'])} | "
-                  f"{sname.ljust(col_widths['Session Name'])} | "
-                  f"{proj.ljust(col_widths['Project Directory'])} | "
-                  f"{active.ljust(col_widths['Last Active'])} |")
+        def print_row(idx, agent, sid, sname, proj, active, is_header=False):
+            c_idx = idx.ljust(col_widths['Idx'])
+            c_agent = agent.ljust(col_widths['Agent'])
+            c_sid = sid.ljust(col_widths['Session ID'])
+            c_sname = sname.ljust(col_widths['Session Name'])
+            c_proj = proj.ljust(col_widths['Project Directory'])
+            c_active = active.ljust(col_widths['Last Active'])
+            
+            if is_header:
+                print(f" {BOLD}{c_idx}  {c_agent}  {c_sid}  {c_sname}  {c_proj}  {c_active}{RESET}")
+            else:
+                agent_c = CYAN if agent == "Gemini" else MAGENTA
+                print(f" {YELLOW}{c_idx}{RESET}  {agent_c}{c_agent}{RESET}  {DIM}{c_sid}{RESET}  {c_sname}  {DIM}{c_proj}{RESET}  {GREEN}{c_active}{RESET}")
                    
-        separator_len = sum(col_widths.values()) + 19
-        print("-" * separator_len)
-        print_row("Idx", "Agent", "Session ID", "Session Name", "Project Directory", "Last Active")
-        print("-" * separator_len)
+        separator_len = sum(col_widths.values()) + 11
+        print("─" * separator_len)
+        print_row("Idx", "Agent", "Session ID", "Session Name", "Project Directory", "Last Active", is_header=True)
+        print("─" * separator_len)
         
         for i, row in enumerate(current_page_sessions):
-            # Use global index relative to filtered list for resuming
             global_idx = start_idx + i
             sid_str = str(row.get("session_id", ""))[:12] if row.get("session_id") else "None"
-            print_row(str(global_idx), str(row["Agent"]), sid_str, str(row["Session Name"]), str(row["Project Directory"]), str(row["Last Active"]))
+            print_row(str(global_idx), str(row["Agent"]), sid_str, row["_sname_trunc"], row["_proj_trunc"], str(row["Last Active"]))
         
-        print("-" * separator_len)
+        print("─" * separator_len)
         
         print("\nCommands:")
         print("  [0-9] Resume the session by index")
